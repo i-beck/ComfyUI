@@ -183,7 +183,8 @@ def cleanup_temp():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-if __name__ == "__main__":
+def main(__file__, cuda_malloc_warning, prompt_worker, run, hijack_progress, cleanup_temp):
+    global global_server
     if args.temp_directory:
         temp_dir = os.path.join(os.path.abspath(args.temp_directory), "temp")
         logging.info(f"Setting temp directory to: {temp_dir}")
@@ -199,8 +200,8 @@ if __name__ == "__main__":
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    server = server.PromptServer(loop)
-    q = execution.PromptQueue(server)
+    global_server = server.PromptServer(loop)
+    q = execution.PromptQueue(global_server)
 
     extra_model_paths_config_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "extra_model_paths.yaml")
     if os.path.isfile(extra_model_paths_config_path):
@@ -214,10 +215,10 @@ if __name__ == "__main__":
 
     cuda_malloc_warning()
 
-    server.add_routes()
-    hijack_progress(server)
+    global_server.add_routes()
+    hijack_progress(global_server)
 
-    threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
+    threading.Thread(target=prompt_worker, daemon=True, args=(q, global_server,)).start()
 
     if args.output_directory:
         output_dir = os.path.abspath(args.output_directory)
@@ -257,9 +258,12 @@ if __name__ == "__main__":
         call_on_start = startup_server
 
     try:
-        loop.run_until_complete(server.setup())
-        loop.run_until_complete(run(server, address=args.listen, port=args.port, verbose=not args.dont_print_server, call_on_start=call_on_start))
+        loop.run_until_complete(global_server.setup())
+        loop.run_until_complete(run(global_server, address=args.listen, port=args.port, verbose=not args.dont_print_server, call_on_start=call_on_start))
     except KeyboardInterrupt:
         logging.info("\nStopped server")
 
     cleanup_temp()
+
+if __name__ == "__main__":
+    main(__file__, cuda_malloc_warning, prompt_worker, run, hijack_progress, cleanup_temp)
