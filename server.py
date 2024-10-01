@@ -33,6 +33,28 @@ from model_filemanager import download_model, DownloadModelStatus
 from typing import Optional
 from api_server.routes.internal.internal_routes import InternalRoutes
 
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+def profile_decorator(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        if inspect.iscoroutinefunction(func):
+            result = await func(*args, **kwargs)
+        else:
+            result = func(*args, **kwargs)
+        profiler.disable()
+        profiler.print_stats()
+        return result
+    return wrapper
+
+
+
+
 class BinaryEventTypes:
     PREVIEW_IMAGE = 1
     UNENCODED_PREVIEW_IMAGE = 2
@@ -650,6 +672,7 @@ class PromptServer():
 
         @routes.post("/interrupt")
         async def post_interrupt(request):
+
             nodes.interrupt_processing()
             return web.Response(status=200)
 

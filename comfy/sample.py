@@ -5,6 +5,42 @@ import comfy.utils
 import numpy as np
 import logging
 
+
+
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+
+def profile_decorator(func):
+    unset = True
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        result = unset
+        try:
+            if inspect.iscoroutinefunction(func):
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(func(*args, **kwargs))
+                loop.close()
+            else:
+                result = func(*args, **kwargs)
+        except BaseException as _:
+            raise
+        finally:
+            profiler.disable()
+            profiler.print_stats()
+        if result is not unset:
+            return result
+        return
+    return wrapper
+
+
+
 def prepare_noise(latent_image, seed, noise_inds=None):
     """
     creates random noise given a latent image and a seed.
@@ -37,6 +73,7 @@ def prepare_sampling(model, noise_shape, positive, negative, noise_mask):
 def cleanup_additional_models(models):
     logging.warning("Warning: comfy.sample.cleanup_additional_models isn't used anymore and can be removed")
 
+@profile_decorator
 def sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0, disable_noise=False, start_step=None, last_step=None, force_full_denoise=False, noise_mask=None, sigmas=None, callback=None, disable_pbar=False, seed=None):
     sampler = comfy.samplers.KSampler(model, steps=steps, device=model.load_device, sampler=sampler_name, scheduler=scheduler, denoise=denoise, model_options=model.model_options)
 

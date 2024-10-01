@@ -36,6 +36,42 @@ import folder_paths
 import latent_preview
 import node_helpers
 
+
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+
+def profile_decorator(func):
+    unset = True
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        result = unset
+        try:
+            if inspect.iscoroutinefunction(func):
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(func(*args, **kwargs))
+                loop.close()
+            else:
+                result = func(*args, **kwargs)
+        except BaseException as _:
+            raise
+        finally:
+            profiler.disable()
+            profiler.print_stats()
+        if result is not unset:
+            return result
+        return
+    return wrapper
+
+
+
+
 def before_node_execution():
     comfy.model_management.throw_exception_if_processing_interrupted()
 
@@ -1429,7 +1465,8 @@ class KSampler:
 
     CATEGORY = "sampling"
     DESCRIPTION = "Uses the provided model, positive and negative conditioning to denoise the latent image."
-
+    
+    @profile_decorator
     def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0):
         return common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=denoise)
 
@@ -1458,6 +1495,7 @@ class KSamplerAdvanced:
 
     CATEGORY = "sampling"
 
+    @profile_decorator
     def sample(self, model, add_noise, noise_seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0):
         force_full_denoise = True
         if return_with_leftover_noise == "enable":

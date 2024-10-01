@@ -7,6 +7,40 @@ import comfy.utils
 import node_helpers
 
 
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+
+def profile_decorator(func):
+    unset = True
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        result = unset
+        try:
+            if inspect.iscoroutinefunction(func):
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(func(*args, **kwargs))
+                loop.close()
+            else:
+                result = func(*args, **kwargs)
+        except BaseException as _:
+            raise
+        finally:
+            profiler.disable()
+            profiler.print_stats()
+        if result is not unset:
+            return result
+        return
+    return wrapper
+
+
+
 class BasicScheduler:
     @classmethod
     def INPUT_TYPES(s):
@@ -453,6 +487,7 @@ class SamplerCustom:
 
     CATEGORY = "sampling/custom_sampling"
 
+    @profile_decorator
     def sample(self, model, add_noise, noise_seed, cfg, positive, negative, sampler, sigmas, latent_image):
         latent = latent_image
         latent_image = latent["samples"]
@@ -615,6 +650,7 @@ class SamplerCustomAdvanced:
 
     CATEGORY = "sampling/custom_sampling"
 
+    @profile_decorator
     def sample(self, noise, guider, sampler, sigmas, latent_image):
         latent = latent_image
         latent_image = latent["samples"]

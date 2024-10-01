@@ -11,6 +11,41 @@ from . import deis
 import comfy.model_patcher
 import comfy.model_sampling
 
+
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+
+def profile_decorator(func):
+    unset = True
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        result = unset
+        try:
+            if inspect.iscoroutinefunction(func):
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(func(*args, **kwargs))
+                loop.close()
+            else:
+                result = func(*args, **kwargs)
+        except BaseException as _:
+            raise
+        finally:
+            profiler.disable()
+            profiler.print_stats()
+        if result is not unset:
+            return result
+        return
+    return wrapper
+
+
+
 def append_zero(x):
     return torch.cat([x, x.new_zeros([1])])
 
@@ -493,6 +528,7 @@ class DPMSolver(nn.Module):
 
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpm_fast(model, x, sigma_min, sigma_max, n, extra_args=None, callback=None, disable=None, eta=0., s_noise=1., noise_sampler=None):
     """DPM-Solver-Fast (fixed step size). See https://arxiv.org/abs/2206.00927."""
     if sigma_min <= 0 or sigma_max <= 0:
@@ -505,6 +541,7 @@ def sample_dpm_fast(model, x, sigma_min, sigma_max, n, extra_args=None, callback
 
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpm_adaptive(model, x, sigma_min, sigma_max, extra_args=None, callback=None, disable=None, order=3, rtol=0.05, atol=0.0078, h_init=0.05, pcoeff=0., icoeff=1., dcoeff=0., accept_safety=0.81, eta=0., s_noise=1., noise_sampler=None, return_info=False):
     """DPM-Solver-12 and 23 (adaptive step size). See https://arxiv.org/abs/2206.00927."""
     if sigma_min <= 0 or sigma_max <= 0:
@@ -520,6 +557,7 @@ def sample_dpm_adaptive(model, x, sigma_min, sigma_max, extra_args=None, callbac
 
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_2s_ancestral(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         return sample_dpmpp_2s_ancestral_RF(model, x, sigmas, extra_args, callback, disable, eta, s_noise, noise_sampler)
@@ -557,6 +595,7 @@ def sample_dpmpp_2s_ancestral(model, x, sigmas, extra_args=None, callback=None, 
 
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_2s_ancestral_RF(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """Ancestral sampling with DPM-Solver++(2S) second-order steps."""
     extra_args = {} if extra_args is None else extra_args
@@ -606,6 +645,7 @@ def sample_dpmpp_2s_ancestral_RF(model, x, sigmas, extra_args=None, callback=Non
     return x
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, r=1 / 2):
     """DPM-Solver++ (stochastic)."""
     if len(sigmas) <= 1:
@@ -652,6 +692,7 @@ def sample_dpmpp_sde(model, x, sigmas, extra_args=None, callback=None, disable=N
 
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
     """DPM-Solver++(2M)."""
     extra_args = {} if extra_args is None else extra_args
@@ -677,6 +718,7 @@ def sample_dpmpp_2m(model, x, sigmas, extra_args=None, callback=None, disable=No
     return x
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, solver_type='midpoint'):
     """DPM-Solver++(2M) SDE."""
     if len(sigmas) <= 1:
@@ -725,6 +767,7 @@ def sample_dpmpp_2m_sde(model, x, sigmas, extra_args=None, callback=None, disabl
     return x
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_3m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """DPM-Solver++(3M) SDE."""
 
@@ -778,6 +821,7 @@ def sample_dpmpp_3m_sde(model, x, sigmas, extra_args=None, callback=None, disabl
     return x
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_3m_sde_gpu(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     if len(sigmas) <= 1:
         return x
@@ -787,6 +831,7 @@ def sample_dpmpp_3m_sde_gpu(model, x, sigmas, extra_args=None, callback=None, di
     return sample_dpmpp_3m_sde(model, x, sigmas, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler)
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_2m_sde_gpu(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, solver_type='midpoint'):
     if len(sigmas) <= 1:
         return x
@@ -796,6 +841,7 @@ def sample_dpmpp_2m_sde_gpu(model, x, sigmas, extra_args=None, callback=None, di
     return sample_dpmpp_2m_sde(model, x, sigmas, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler, solver_type=solver_type)
 
 @torch.no_grad()
+@profile_decorator
 def sample_dpmpp_sde_gpu(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, r=1 / 2):
     if len(sigmas) <= 1:
         return x
@@ -831,10 +877,12 @@ def generic_step_sampler(model, x, sigmas, extra_args=None, callback=None, disab
 
 
 @torch.no_grad()
+@profile_decorator
 def sample_ddpm(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None):
     return generic_step_sampler(model, x, sigmas, extra_args, callback, disable, noise_sampler, DDPMSampler_step)
 
 @torch.no_grad()
+@profile_decorator
 def sample_lcm(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None):
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
@@ -852,6 +900,7 @@ def sample_lcm(model, x, sigmas, extra_args=None, callback=None, disable=None, n
 
 
 @torch.no_grad()
+@profile_decorator
 def sample_heunpp2(model, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
     # From MIT licensed: https://github.com/Carzit/sd-webui-samplers-scheduler/
     extra_args = {} if extra_args is None else extra_args
@@ -910,6 +959,7 @@ def sample_heunpp2(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
+@profile_decorator
 def sample_ipndm(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=4):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -1014,6 +1064,7 @@ def sample_ipndm_v(model, x, sigmas, extra_args=None, callback=None, disable=Non
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
 @torch.no_grad()
+@profile_decorator
 def sample_deis(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab'):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])

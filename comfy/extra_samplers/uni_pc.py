@@ -6,6 +6,40 @@ import math
 
 from tqdm.auto import trange, tqdm
 
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+
+def profile_decorator(func):
+    unset = True
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        result = unset
+        try:
+            if inspect.iscoroutinefunction(func):
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(func(*args, **kwargs))
+                loop.close()
+            else:
+                result = func(*args, **kwargs)
+        except BaseException as _:
+            raise
+        finally:
+            profiler.disable()
+            profiler.print_stats()
+        if result is not unset:
+            return result
+        return
+    return wrapper
+
+
+
 
 class NoiseScheduleVP:
     def __init__(
@@ -698,6 +732,7 @@ class UniPC:
         return x_t, model_t
 
 
+    @profile_decorator
     def sample(self, x, timesteps, t_start=None, t_end=None, order=3, skip_type='time_uniform',
         method='singlestep', lower_order_final=True, denoise_to_zero=False, solver_type='dpm_solver',
         atol=0.0078, rtol=0.05, corrector=False, callback=None, disable_pbar=False

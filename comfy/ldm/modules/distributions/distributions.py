@@ -1,8 +1,42 @@
 import torch
 import numpy as np
 
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+
+def profile_decorator(func):
+    unset = True
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        result = unset
+        try:
+            if inspect.iscoroutinefunction(func):
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(func(*args, **kwargs))
+                loop.close()
+            else:
+                result = func(*args, **kwargs)
+        except BaseException as _:
+            raise
+        finally:
+            profiler.disable()
+            profiler.print_stats()
+        if result is not unset:
+            return result
+        return
+    return wrapper
+
+
 
 class AbstractDistribution:
+    @profile_decorator
     def sample(self):
         raise NotImplementedError()
 
@@ -14,6 +48,7 @@ class DiracDistribution(AbstractDistribution):
     def __init__(self, value):
         self.value = value
 
+    @profile_decorator
     def sample(self):
         return self.value
 
@@ -32,6 +67,7 @@ class DiagonalGaussianDistribution(object):
         if self.deterministic:
             self.var = self.std = torch.zeros_like(self.mean).to(device=self.parameters.device)
 
+    @profile_decorator
     def sample(self):
         x = self.mean + self.std * torch.randn(self.mean.shape).to(device=self.parameters.device)
         return x

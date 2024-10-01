@@ -1,5 +1,9 @@
 import comfy.options
+
+
 comfy.options.enable_args_parsing()
+
+from profile_tools import profile_decorator
 
 import os
 import importlib.util
@@ -7,6 +11,14 @@ import folder_paths
 import time
 from comfy.cli_args import args
 from app.logger import setup_logger
+
+
+import cProfile
+import pstats
+import io
+# from pstats import Sort_pstats
+from line_profiler import LineProfiler
+
 
 
 setup_logger(verbose=args.verbose)
@@ -104,6 +116,7 @@ def cuda_malloc_warning():
         if cuda_malloc_warning:
             logging.warning("\nWARNING: this card most likely does not support cuda-malloc, if you get \"CUDA error\" please run ComfyUI with: --disable-cuda-malloc\n")
 
+
 def prompt_worker(q, server):
     e = execution.PromptExecutor(server, lru_size=args.cache_lru)
     last_gc_collect = 0
@@ -159,6 +172,7 @@ def prompt_worker(q, server):
                 last_gc_collect = current_time
                 need_gc = False
 
+@profile_decorator
 async def run(server, address='', port=8188, verbose=True, call_on_start=None):
     addresses = []
     for addr in address.split(","):
@@ -265,5 +279,49 @@ def main(__file__, cuda_malloc_warning, prompt_worker, run, hijack_progress, cle
 
     cleanup_temp()
 
+
+def profile_main():
+    profiler = LineProfiler()
+    profiler.add_function(execute_prestartup_script)
+    profiler.add_function(prompt_worker)
+    profiler.add_function(run)
+    # profiler.run('main()')
+    profiler.run('main(__file__, cuda_malloc_warning, prompt_worker, run, hijack_progress, cleanup_temp)')
+    profiler.print_stats()
+
+def main_profiler():
+    pr = cProfile.Profile()
+    pr.enable()
+    try:
+        main(__file__, cuda_malloc_warning, prompt_worker, run, hijack_progress, cleanup_temp)
+    except KeyboardInterrupt:
+        logging.info("\nStopped server")
+    finally:
+        finally_close(pr)
+
+
+
+def finally_close(pr):
+    pr.disable()
+    s = io.StringIO()
+    ps = pstats.Stats(pr, stream=s)
+    ps.sort_stats('cumulative')
+    ps.print_stats()
+    print(s.getvalue())
+
 if __name__ == "__main__":
-    main(__file__, cuda_malloc_warning, prompt_worker, run, hijack_progress, cleanup_temp)
+    if args.profile:
+        profile_main()
+    elif args.cprofile:
+        main_profiler()
+    else:
+        main(__file__, cuda_malloc_warning, prompt_worker, run, hijack_progress, cleanup_temp)
+
+
+
+
+# if __name__ == "__main__":
+#     main(__file__, cuda_malloc_warning, prompt_worker, run, hijack_progress, cleanup_temp)
+
+
+

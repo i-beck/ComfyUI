@@ -18,6 +18,32 @@ from comfy_execution.graph_utils import is_link, GraphBuilder
 from comfy_execution.caching import HierarchicalCache, LRUCache, CacheKeySetInputSignature, CacheKeySetID
 from comfy.cli_args import args
 
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+
+def profile_decorator(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        if inspect.iscoroutinefunction(func):
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(func(*args, **kwargs))
+            loop.close()
+        else:
+            result = func(*args, **kwargs)
+        profiler.disable()
+        profiler.print_stats()
+        return result
+    return wrapper
+
+
+
 class ExecutionResult(Enum):
     SUCCESS = 0
     FAILURE = 1
@@ -130,6 +156,7 @@ def get_input_data(inputs, class_def, unique_id, outputs=None, dynprompt=None, e
 
 map_node_over_list = None #Don't hook this please
 
+# @profile_decorator
 def _map_node_over_list(obj, input_data_all, func, allow_interrupt=False, execution_block_cb=None, pre_execute_cb=None):
     # check if node wants the lists
     input_is_list = getattr(obj, "INPUT_IS_LIST", False)
@@ -144,6 +171,7 @@ def _map_node_over_list(obj, input_data_all, func, allow_interrupt=False, execut
         return {k: v[i if len(v) > i else -1] for k, v in d.items()}
     
     results = []
+    @profile_decorator
     def process_inputs(inputs, index=None):
         if allow_interrupt:
             nodes.before_node_execution()
@@ -155,7 +183,11 @@ def _map_node_over_list(obj, input_data_all, func, allow_interrupt=False, execut
         if execution_block is None:
             if pre_execute_cb is not None and index is not None:
                 pre_execute_cb(index)
-            results.append(getattr(obj, func)(**inputs))
+            @profile_decorator
+            def bs_function():
+                logging.info("map_node_over_list: %s", func)
+                results.append(getattr(obj, func)(**inputs))
+            bs_function()
         else:
             results.append(execution_block)
 
@@ -190,6 +222,7 @@ def merge_result_data(results, obj):
             output.append([o[i] for o in results])
     return output
 
+# @profile_decorator
 def get_output_data(obj, input_data_all, execution_block_cb=None, pre_execute_cb=None):
     
     results = []
@@ -240,7 +273,8 @@ def format_value(x):
         return x
     else:
         return str(x)
-
+    
+# @profile_decorator
 def execute(server, dynprompt, caches, current_item, extra_data, executed, prompt_id, execution_list, pending_subgraph_results):
     unique_id = current_item
     real_node_id = dynprompt.get_real_node_id(unique_id)
@@ -456,6 +490,7 @@ class PromptExecutor:
                 "current_outputs": list(current_outputs),
             }
             self.add_message("execution_error", mes, broadcast=False)
+
 
     def execute(self, prompt, prompt_id, extra_data={}, execute_outputs=[]):
         nodes.interrupt_processing(False)

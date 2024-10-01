@@ -9,6 +9,43 @@ import comfy.sampler_helpers
 import scipy.stats
 import numpy
 
+
+
+from line_profiler import LineProfiler
+import inspect
+from functools import wraps
+
+
+def profile_decorator(func):
+    unset = True
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = LineProfiler()
+        profiler.add_function(func)
+        profiler.enable()
+        result = unset
+        try:
+            if inspect.iscoroutinefunction(func):
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(func(*args, **kwargs))
+                loop.close()
+            else:
+                result = func(*args, **kwargs)
+        except BaseException as _:
+            raise
+        finally:
+            profiler.disable()
+            profiler.print_stats()
+        if result is not unset:
+            return result
+        return
+    return wrapper
+
+
+
+
 def get_area_and_mult(conds, x_in, timestep_in):
     dims = tuple(x_in.shape[2:])
     area = None
@@ -561,6 +598,8 @@ def encode_model_conds(model_function, conds, noise, device, prompt_type, **kwar
     return conds
 
 class Sampler:
+    
+    @profile_decorator
     def sample(self):
         pass
 
@@ -580,6 +619,7 @@ class KSAMPLER(Sampler):
         self.extra_options = extra_options
         self.inpaint_options = inpaint_options
 
+    @profile_decorator
     def sample(self, model_wrap, sigmas, extra_args, callback, noise, latent_image=None, denoise_mask=None, disable_pbar=False):
         extra_args["denoise_mask"] = denoise_mask
         model_k = KSamplerX0Inpaint(model_wrap, sigmas)
@@ -694,7 +734,8 @@ class CFGGuider:
 
         samples = sampler.sample(self, sigmas, extra_args, callback, noise, latent_image, denoise_mask, disable_pbar)
         return self.inner_model.process_latent_out(samples.to(torch.float32))
-
+    
+    @profile_decorator
     def sample(self, noise, latent_image, sampler, sigmas, denoise_mask=None, callback=None, disable_pbar=False, seed=None):
         if sigmas.shape[-1] == 0:
             return latent_image
@@ -721,7 +762,7 @@ class CFGGuider:
         del self.loaded_models
         return output
 
-
+@profile_decorator
 def sample(model, noise, positive, negative, cfg, device, sampler, sigmas, model_options={}, latent_image=None, denoise_mask=None, callback=None, disable_pbar=False, seed=None):
     cfg_guider = CFGGuider(model)
     cfg_guider.set_conds(positive, negative)
@@ -805,7 +846,7 @@ class KSampler:
                 new_steps = int(steps/denoise)
                 sigmas = self.calculate_sigmas(new_steps).to(self.device)
                 self.sigmas = sigmas[-(steps + 1):]
-
+    @profile_decorator
     def sample(self, noise, positive, negative, cfg, latent_image=None, start_step=None, last_step=None, force_full_denoise=False, denoise_mask=None, sigmas=None, callback=None, disable_pbar=False, seed=None):
         if sigmas is None:
             sigmas = self.sigmas
